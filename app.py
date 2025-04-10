@@ -2,6 +2,9 @@
 """
 This module demonstrates the usage of the Gemini API in Vertex AI within a Streamlit application.
 """
+from dotenv import load_dotenv
+
+load_dotenv()
 
 import os
 
