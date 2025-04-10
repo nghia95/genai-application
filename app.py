@@ -13,6 +13,14 @@ import google.auth
 from google.genai.types import GenerateContentConfig, Part
 import httpx
 import streamlit as st
+import pandas as pd
+import scipy
+from langchain.chains import ConversationalRetrievalChain, RetrievalQA
+from langchain.document_loaders import WikipediaLoader
+from langchain.memory import ConversationBufferMemory
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_chroma import Chroma
+from langchain_google_vertexai import VertexAI, VertexAIEmbeddings
 
 
 def _project_id() -> str:
@@ -82,9 +90,10 @@ if cloud_run_service:
 st.header(":sparkles: Gemini API in Vertex AI", divider="rainbow")
 client = load_client()
 
-freeform_tab, tab1, tab2, tab3, tab4 = st.tabs(
+freeform_tab, wiki_tab, tab1, tab2, tab3, tab4 = st.tabs(
     [
         "Freeform",
+        "Wikipedia QA",
         "Generate story",
         "Marketing campaign",
         "Image Playground",
@@ -163,6 +172,77 @@ with freeform_tab:
                     f"""Parameters:\n- Model ID: `{selected_model}`\n- Temperature: `{temperature}`\n- Top P: `{top_p}`\n- Max Output Tokens: `{max_output_tokens}`\n"""
                 )
                 st.code(prompt, language="markdown")
+
+with wiki_tab:
+    st.subheader("Enter Your Own Prompt about something in Wikipedia")
+
+    selected_model_wiki = st.radio(
+        "Select Model:",
+        MODELS.keys(),
+        format_func=get_model_name,
+        key="selected_model_wiki",
+        horizontal=True,
+    )
+
+    temperature_wiki = st.slider(
+        "Select the temperature (Model Randomness):",
+        min_value=0.0,
+        max_value=2.0,
+        value=0.5,
+        step=0.05,
+        key="temperature_wiki",
+    )
+
+    max_output_tokens_wiki = st.slider(
+        "Maximum Number of Tokens to Generate:",
+        min_value=1,
+        max_value=8192,
+        value=2048,
+        step=1,
+        key="max_output_tokens_wiki",
+    )
+
+    top_p_wiki = st.slider(
+        "Select the Top P",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.95,
+        step=0.05,
+        key="top_p_wki",
+    )
+
+    prompt_wiki = st.text_area(
+        "Enter your prompt here...",
+        key="prompt_wiki",
+        height=200,
+    )
+
+    config_wiki = GenerateContentConfig(
+        temperature=temperature_wiki,
+        max_output_tokens=max_output_tokens_wiki,
+        top_p=top_p_wiki,
+    )
+
+    generate_form_wiki = st.button("Generate", key="generate_freeform_wiki")
+    if generate_form_wiki and prompt_wiki:
+        with st.spinner(
+            f"Generating response using {get_model_name(selected_model_wiki)} ..."
+        ):
+            first_tab1_wiki, first_tab2_wiki = st.tabs(["Response", "Prompt"])
+            with first_tab1_wiki:
+                response_wiki = client.models.generate_content(
+                    model=selected_model_wiki,
+                    contents=prompt_wiki,
+                    config=config_wiki,
+                ).text
+
+                if response_wiki:
+                    st.markdown(response_wiki)
+            with first_tab2_wiki:
+                st.markdown(
+                    f"""Parameters:\n- Model ID: `{selected_model_wiki}`\n- Temperature: `{temperature_wiki}`\n- Top P: `{top_p_wiki}`\n- Max Output Tokens: `{max_output_tokens_wiki}`\n"""
+                )
+                st.code(prompt_wiki, language="markdown")
 
 with tab1:
     st.subheader("Generate a story")
