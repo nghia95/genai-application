@@ -15,8 +15,12 @@ import httpx
 import streamlit as st
 import pandas as pd
 import scipy
+from langchain import hub
+from langchain.chains import create_retrieval_chain
+from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain.chains import ConversationalRetrievalChain, RetrievalQA
-from langchain.document_loaders import WikipediaLoader
+# from langchain.document_loaders import WikipediaLoader
+from langchain_community.document_loaders import WikipediaLoader
 from langchain.memory import ConversationBufferMemory
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
@@ -55,7 +59,14 @@ MODELS = {
     "gemini-2.0-flash-thinking-exp-01-21": "Gemini 2.0 Flash Thinking",
     "gemini-2.0-pro-exp-02-05": "Gemini 2.0 Pro",
 }
+EMBEDDING_MODEL = "text-embedding-004"
+import getpass
+import os
 
+os.environ["LANGCHAIN_TRACING_V2"] = "true"
+os.environ["LANGSMITH_ENDPOINT"] = "https://api.smith.langchain.com"
+os.environ["LANGCHAIN_API_KEY"] = "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"
+os.environ["LANGCHAIN_PROJECT"] = "My_project"
 
 @st.cache_resource
 def load_client() -> genai.Client:
@@ -184,31 +195,8 @@ with wiki_tab:
         horizontal=True,
     )
 
-    temperature_wiki = st.slider(
-        "Select the temperature (Model Randomness):",
-        min_value=0.0,
-        max_value=2.0,
-        value=0.5,
-        step=0.05,
-        key="temperature_wiki",
-    )
-
-    max_output_tokens_wiki = st.slider(
-        "Maximum Number of Tokens to Generate:",
-        min_value=1,
-        max_value=8192,
-        value=2048,
-        step=1,
-        key="max_output_tokens_wiki",
-    )
-
-    top_p_wiki = st.slider(
-        "Select the Top P",
-        min_value=0.0,
-        max_value=1.0,
-        value=0.95,
-        step=0.05,
-        key="top_p_wki",
+    topic = st.text_input(
+        "Enter the topic to search on wiki: \n\n", key="wiki_topic", value="Large Language Model"
     )
 
     prompt_wiki = st.text_area(
@@ -217,32 +205,75 @@ with wiki_tab:
         height=200,
     )
 
-    config_wiki = GenerateContentConfig(
-        temperature=temperature_wiki,
-        max_output_tokens=max_output_tokens_wiki,
-        top_p=top_p_wiki,
-    )
 
     generate_form_wiki = st.button("Generate", key="generate_freeform_wiki")
+
+    
     if generate_form_wiki and prompt_wiki:
         with st.spinner(
             f"Generating response using {get_model_name(selected_model_wiki)} ..."
         ):
             first_tab1_wiki, first_tab2_wiki = st.tabs(["Response", "Prompt"])
+            docs = WikipediaLoader(query=topic, load_max_docs=10).load()
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=800,
+                chunk_overlap=400,
+                length_function=len,
+            )
+
+            chunks = text_splitter.split_documents(docs)
+            embedding = VertexAIEmbeddings(model_name=EMBEDDING_MODEL)
+
+            # set persist directory so the vector store is saved to disk
+            db = Chroma.from_documents(chunks, embedding, persist_directory="./vectorstore")
+
+        # vector store
+            retriever = db.as_retriever(
+                search_type="similarity",
+                search_kwargs={"k": 10},  # number of nearest neighbors to retrieve
+            )
+
+        # You can also set temperature, top_p, top_k
+            llm = VertexAI(model_name=selected_model_wiki, max_output_tokens=1024)
+
+        # retrieval_qa_chat_prompt = hub.pull("langchain-ai/retrieval-qa-chat")
+
+        # combine_docs_chain = create_stuff_documents_chain(llm, retrieval_qa_chat_prompt)
+        # rag_chain = create_retrieval_chain(retriever, combine_docs_chain)
+
+        # q/a chain
+            rag_chain = RetrievalQA.from_chain_type(
+                llm=llm,
+                chain_type="stuff",
+                retriever=retriever,
+                return_source_documents=True,
+            )
+            #response_wiki = rag_chain.invoke({"input":prompt_wiki})
+            
             with first_tab1_wiki:
-                response_wiki = client.models.generate_content(
-                    model=selected_model_wiki,
-                    contents=prompt_wiki,
-                    config=config_wiki,
-                ).text
+                response_wiki = rag_chain.invoke(prompt_wiki)
+                citations = {doc.metadata["source"] for doc in response_wiki["source_documents"]}
+
+               
+                # response_wiki = client.models.generate_content(
+                #     model=selected_model_wiki,
+                #     contents=prompt_wiki,
+                #     config=config_wiki,
+                # ).text
 
                 if response_wiki:
-                    st.markdown(response_wiki)
+                    #st.markdown(response_wiki['answer'])
+                    st.markdown(response_wiki["result"])
+                    st.markdown(f"Citations: {citations}\n")
             with first_tab2_wiki:
                 st.markdown(
-                    f"""Parameters:\n- Model ID: `{selected_model_wiki}`\n- Temperature: `{temperature_wiki}`\n- Top P: `{top_p_wiki}`\n- Max Output Tokens: `{max_output_tokens_wiki}`\n"""
+                    f"""Parameters:\n- Model ID: `{selected_model_wiki}`\n"""
                 )
                 st.code(prompt_wiki, language="markdown")
+            
+            # with source:
+            #     sources = response_wiki['context'][0]
+            #     st.markdown(sources)
 
 with tab1:
     st.subheader("Generate a story")
