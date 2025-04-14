@@ -20,7 +20,7 @@ from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain.chains import ConversationalRetrievalChain, RetrievalQA
 # from langchain.document_loaders import WikipediaLoader
-from langchain_community.document_loaders import WikipediaLoader
+from langchain_community.document_loaders import WikipediaLoader,PyPDFLoader, WebBaseLoader
 from langchain.memory import ConversationBufferMemory
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
@@ -101,10 +101,11 @@ if cloud_run_service:
 st.header(":sparkles: Gemini API in Vertex AI", divider="rainbow")
 client = load_client()
 
-freeform_tab, wiki_tab, tab1, tab2, tab3, tab4 = st.tabs(
+freeform_tab, wiki_tab, pdf_tab, tab1, tab2, tab3, tab4 = st.tabs(
     [
         "Freeform",
         "Wikipedia QA",
+        "PDF QA",
         "Generate story",
         "Marketing campaign",
         "Image Playground",
@@ -274,6 +275,93 @@ with wiki_tab:
             # with source:
             #     sources = response_wiki['context'][0]
             #     st.markdown(sources)
+
+with pdf_tab:
+    st.subheader("Enter Your Own Prompt about something in Wikipedia")
+
+    selected_model_pdf = st.radio(
+        "Select Model:",
+        MODELS.keys(),
+        format_func=get_model_name,
+        key="selected_model_pdf",
+        horizontal=True,
+    )
+
+    file_path = st.text_input(
+        "Enter the database path: \n\n", key="file_path", value="https://abc.xyz/assets/investor/static/pdf/20230203_alphabet_10K.pdf"
+    )
+
+    prompt_pdf = st.text_area(
+        "Enter your prompt here...",
+        key="prompt_pdf",
+        height=200,
+    )
+
+
+    generate_form_pdf = st.button("Generate", key="generate_freeform_pdf")
+
+    
+    if generate_form_pdf and prompt_pdf:
+        with st.spinner(
+            f"Generating response using {get_model_name(selected_model_wiki)} ..."
+        ):
+            first_tab1_pdf, first_tab2_pdf = st.tabs(["Response", "Prompt"])
+            documents = PyPDFLoader(file_path).load()
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=1500,
+                chunk_overlap=40,
+                length_function=len,
+            )
+
+            chunks_pdf = text_splitter.split_documents(documents)
+            embedding_pdf = VertexAIEmbeddings(model_name=EMBEDDING_MODEL)
+
+            # set persist directory so the vector store is saved to disk
+            db_pdf = Chroma.from_documents(chunks_pdf, embedding_pdf, persist_directory="./vectorstore")
+
+        # vector store
+            retriever_pdf = db_pdf.as_retriever(
+                search_type="similarity",
+                search_kwargs={"k": 10},  # number of nearest neighbors to retrieve
+            )
+
+        # You can also set temperature, top_p, top_k
+            llm_pdf = VertexAI(model_name=selected_model_pdf, max_output_tokens=1024)
+
+        # retrieval_qa_chat_prompt = hub.pull("langchain-ai/retrieval-qa-chat")
+
+        # combine_docs_chain = create_stuff_documents_chain(llm, retrieval_qa_chat_prompt)
+        # rag_chain = create_retrieval_chain(retriever, combine_docs_chain)
+
+        # q/a chain
+            rag_chain_pdf = RetrievalQA.from_chain_type(
+                llm=llm_pdf,
+                chain_type="stuff",
+                retriever=retriever_pdf,
+                return_source_documents=True,
+            )
+            #response_wiki = rag_chain.invoke({"input":prompt_wiki})
+            
+            with first_tab1_pdf:
+                response_pdf = rag_chain_pdf.invoke(prompt_pdf)
+                citations_pdf = {doc.metadata["source"] for doc in response_pdf["source_documents"]}
+
+               
+                # response_wiki = client.models.generate_content(
+                #     model=selected_model_wiki,
+                #     contents=prompt_wiki,
+                #     config=config_wiki,
+                # ).text
+
+                if response_pdf:
+                    #st.markdown(response_wiki['answer'])
+                    st.markdown(response_pdf["result"])
+                    st.markdown(f"Citations: {citations_pdf}\n")
+            with first_tab2_pdf:
+                st.markdown(
+                    f"""Parameters:\n- Model ID: `{selected_model_pdf}`\n"""
+                )
+                st.code(prompt_pdf, language="markdown")
 
 with tab1:
     st.subheader("Generate a story")
