@@ -288,8 +288,10 @@ with pdf_tab:
     )
 
     file_path = st.text_input(
-        "Enter the database path: \n\n", key="file_path", value="https://abc.xyz/assets/investor/static/pdf/20230203_alphabet_10K.pdf"
+        #"Enter the database path: \n\n", key="file_path", value="https://abc.xyz/assets/investor/static/pdf/20230203_alphabet_10K.pdf"
+        "Enter the database path: \n\n", key="file_path", value="../data"
     )
+
 
     prompt_pdf = st.text_area(
         "Enter your prompt here...",
@@ -306,7 +308,14 @@ with pdf_tab:
             f"Generating response using {get_model_name(selected_model_wiki)} ..."
         ):
             first_tab1_pdf, first_tab2_pdf = st.tabs(["Response", "Prompt"])
-            documents = PyPDFLoader(file_path).load()
+
+            documents = []
+            for file in os.listdir(file_path):
+                if file.endswith('.pdf'):
+                    pdf_path = os.path.join(file_path, file)
+                    loader = PyPDFLoader(pdf_path)
+                    documents.extend(loader.load())
+            #documents = PyPDFLoader(file_path).load()
             text_splitter = RecursiveCharacterTextSplitter(
                 chunk_size=1500,
                 chunk_overlap=40,
